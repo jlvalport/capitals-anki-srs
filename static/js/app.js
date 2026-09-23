@@ -11,6 +11,10 @@ const state = {
   currentTab: 'anki',
   dueCards: [],
   currentCardIndex: 0,
+  dueCount: 0,
+  newCount: 0,
+  learnedCount: 0,
+  sessionTotal: 0,
   isCardFlipped: false,
   isTransitioning: false,
   cardStartTime: null,
@@ -434,6 +438,38 @@ function switchTab(tabName) {
 // MODO ANKI SRS (REPETICIÓN ESPACIADA)
 // ============================================================================
 
+function pulseBadge(elemId) {
+  const elem = document.getElementById(elemId);
+  if (!elem) return;
+  elem.classList.add('scale-110');
+  setTimeout(() => {
+    elem.classList.remove('scale-110');
+  }, 350);
+}
+
+function updateSessionIndicators() {
+  const dueElem = document.getElementById('counter-due');
+  const newElem = document.getElementById('counter-new');
+  const learnedElem = document.getElementById('counter-learned');
+  const cardCurrentElem = document.getElementById('session-card-current');
+  const cardTotalElem = document.getElementById('session-card-total');
+  const pctElem = document.getElementById('session-progress-pct');
+  const barElem = document.getElementById('session-progress-bar');
+
+  if (dueElem) dueElem.textContent = state.dueCount;
+  if (newElem) newElem.textContent = state.newCount;
+  if (learnedElem) learnedElem.textContent = state.learnedCount;
+
+  const total = state.dueCards ? state.dueCards.length : 0;
+  const current = total > 0 ? Math.min(state.currentCardIndex + 1, total) : 0;
+  if (cardCurrentElem) cardCurrentElem.textContent = current;
+  if (cardTotalElem) cardTotalElem.textContent = total;
+
+  const pct = total > 0 ? Math.round((state.currentCardIndex / total) * 100) : 100;
+  if (pctElem) pctElem.textContent = `${pct}%`;
+  if (barElem) barElem.style.width = `${pct}%`;
+}
+
 async function loadDueCards(requestedLimit = 15) {
   const continent = document.getElementById('anki-continent').value;
   try {
@@ -443,19 +479,23 @@ async function loadDueCards(requestedLimit = 15) {
     const data = await res.json();
     state.dueCards = data.cards;
     state.currentCardIndex = 0;
+    state.dueCount = data.due_count;
+    state.newCount = data.new_count;
+    state.sessionTotal = data.cards.length;
 
-    // Actualizar contadores
-    document.getElementById('counter-due').textContent = data.due_count;
-    document.getElementById('counter-new').textContent = data.new_count;
+    updateSessionIndicators();
 
+    const tracker = document.getElementById('anki-session-tracker');
     if (state.dueCards.length > 0) {
       document.getElementById('anki-card-container').classList.remove('hidden');
       document.getElementById('anki-empty-state').classList.add('hidden');
+      if (tracker) tracker.classList.remove('hidden');
       clearInterval(state.countdownInterval);
       renderCurrentCard();
     } else {
       document.getElementById('anki-card-container').classList.add('hidden');
       document.getElementById('anki-empty-state').classList.remove('hidden');
+      if (tracker) tracker.classList.add('hidden');
       startCountdownTimer(data.next_due_time);
     }
   } catch (e) {
@@ -479,6 +519,9 @@ function renderCurrentCard() {
   actionsFront.classList.remove('hidden');
   actionsBack.classList.add('hidden');
 
+  // Actualizar indicadores superiores en tiempo real
+  updateSessionIndicators();
+
   // Inyectar datos en la cara frontal
   document.getElementById('card-flag').textContent = card.flag_emoji;
   document.getElementById('card-country').textContent = card.name_es;
@@ -489,7 +532,7 @@ function renderCurrentCard() {
   if (card.is_learned) {
     statusBadge.textContent = '🌟 Dominada';
     statusBadge.className = 'text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30';
-  } else if (card.state === 'learning') {
+  } else if (card.state === 'learning' || (card.repetitions && card.repetitions > 0)) {
     statusBadge.textContent = '🔄 Repaso';
     statusBadge.className = 'text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-500/30';
   } else {
@@ -544,6 +587,33 @@ async function rateCard(rating) {
   const responseTimeMs = state.cardStartTime ? Date.now() - state.cardStartTime : 0;
   const flashcard = document.getElementById('flashcard');
 
+  // Actualizar de forma inmediata los indicadores superiores para retroalimentación instantánea
+  const isNewCard = !currentCard.repetitions || currentCard.repetitions === 0;
+  if (isNewCard) {
+    state.newCount = Math.max(0, state.newCount - 1);
+  } else {
+    state.dueCount = Math.max(0, state.dueCount - 1);
+  }
+
+  if (rating === 'again') {
+    // Si se falla la tarjeta, se re-añade al final de la sesión para volver a practicarla
+    const retryCard = {
+      ...currentCard,
+      repetitions: (currentCard.repetitions || 0) + 1,
+      state: 'learning'
+    };
+    state.dueCards.push(retryCard);
+    state.dueCount += 1;
+    pulseBadge('badge-counter-due');
+  } else if (rating === 'good' || rating === 'easy') {
+    state.learnedCount += 1;
+    pulseBadge('badge-counter-learned');
+  } else if (rating === 'hard') {
+    pulseBadge('badge-counter-due');
+  }
+
+  updateSessionIndicators();
+
   // 1. Iniciar animación de salida (la tarjeta actual se desvanece suavemente)
   flashcard.classList.remove('card-transition-active');
   flashcard.classList.add('card-transition-exit');
@@ -595,11 +665,15 @@ async function rateCard(rating) {
     state.isTransitioning = false;
   }
 
-  // Esperar respuesta del backend para actualizar contador de dominados
+  // Sincronizar confirmación con base de datos
   try {
     const res = await reviewPromise;
     if (res.ok) {
       const data = await res.json();
+      if (data.total_learned !== undefined) {
+        state.learnedCount = data.total_learned;
+        updateSessionIndicators();
+      }
       if (data.is_learned) {
         triggerLearnedConfetti();
       }
@@ -868,7 +942,8 @@ async function loadStats() {
     document.getElementById('stats-learned').textContent = data.learned_count;
     document.getElementById('stats-learning').textContent = data.learning_count;
     document.getElementById('stats-reviews').textContent = data.total_reviews;
-    document.getElementById('counter-learned').textContent = data.learned_count;
+    state.learnedCount = data.learned_count;
+    updateSessionIndicators();
 
     // Barra de porcentaje
     document.getElementById('stats-percentage').textContent = `${data.mastery_percentage}%`;

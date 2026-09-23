@@ -204,7 +204,19 @@ Para evitar que el usuario vea la capital del siguiente país al calificar:
 4. **Fechas en UTC**:
    - SQLite no almacena tipos de zona horaria; todas las fechas (`due_at`, `expires_at`, `created_at`) deben generarse siempre en UTC (`datetime.now(timezone.utc)`). Nunca usar `datetime.utcnow()` (obsoleto en Python 3.12+).
 5. **Pruebas Automatizadas Obligatorias**:
-   - Tras cualquier cambio en `srs_engine.py`, `auth.py` o `database.py`, ejecutar la suite de pruebas unitarias:
+   - Tras cualquier cambio en `srs_engine.py`, `auth.py`, `main.py` o `database.py`, ejecutar la suite completa de pruebas unitarias e integración (14 tests):
      ```bash
      .venv/bin/python -m unittest discover tests
      ```
+
+## 9. Indicadores en Vivo y Seguimiento de Sesión
+
+- **Contadores Superiores**:
+  - `Repaso`: Cantidad de tarjetas pendientes de revisión (`counter-due`). Se incrementa dinámicamente si el usuario califica con *Otra vez* (Anki re-encola la tarjeta al final de la sesión).
+  - `Nuevas`: Cantidad de tarjetas nuevas restantes en la tanda (`counter-new`). Se reduce inmediatamente al calificar.
+  - `Dominados`: Total global de países aprendidos (`counter-learned`, `is_learned = 1`). Se incrementa en tiempo real con animación de pulso al presionar *Bien* o *Fácil*.
+- **Barra de Progreso de Sesión**:
+  - Indica la tarjeta actual respecto al total (`Tarjeta X de Y`).
+  - Barra de llenado porcentual con degradado índigo (`0%` a `100%`).
+- **Sincronización Bidireccional**:
+  - El backend `/api/srs/review` retorna `total_learned` y `total_learning` tras cada calificación, garantizando coherencia absoluta entre el cliente y SQLite.

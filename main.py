@@ -417,6 +417,18 @@ def submit_review(
         req.response_time_ms
     ))
 
+    # Obtener conteos actualizados del usuario para reflejar de inmediato en frontend
+    cursor.execute("""
+        SELECT 
+            COUNT(CASE WHEN is_learned = 1 THEN 1 END) AS total_learned,
+            COUNT(CASE WHEN is_learned = 0 AND repetitions > 0 THEN 1 END) AS total_learning
+        FROM user_country_progress
+        WHERE user_id = ?;
+    """, (current_user["id"],))
+    count_row = cursor.fetchone()
+    total_learned = count_row["total_learned"] if count_row else 0
+    total_learning = count_row["total_learning"] if count_row else 0
+
     conn.commit()
     conn.close()
 
@@ -428,7 +440,9 @@ def submit_review(
         "interval_seconds": result["interval_seconds"],
         "interval_label": result["interval_label"],
         "is_learned": bool(result["is_learned"]),
-        "due_at": result["due_at"]
+        "due_at": result["due_at"],
+        "total_learned": total_learned,
+        "total_learning": total_learning
     }
 
 

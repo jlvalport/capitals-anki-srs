@@ -189,20 +189,34 @@
           </select>
         </div>
 
-        <!-- Contadores de sesión -->
+        <!-- Contadores de sesión con animaciones de actualización -->
         <div class="flex items-center gap-3 text-xs">
-          <div class="flex items-center gap-1.5 bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-400 px-2.5 py-1 rounded-lg border border-rose-200 dark:border-rose-500/20 font-medium" title="Tarjetas para repasar">
+          <div id="badge-counter-due" class="flex items-center gap-1.5 bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-400 px-2.5 py-1 rounded-lg border border-rose-200 dark:border-rose-500/20 font-medium transition-transform duration-300" title="Tarjetas para repasar">
             <span class="w-2 h-2 rounded-full bg-rose-500"></span>
             <span>Repaso: <b id="counter-due" class="font-bold">0</b></span>
           </div>
-          <div class="flex items-center gap-1.5 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 px-2.5 py-1 rounded-lg border border-blue-200 dark:border-blue-500/20 font-medium" title="Tarjetas nuevas">
+          <div id="badge-counter-new" class="flex items-center gap-1.5 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 px-2.5 py-1 rounded-lg border border-blue-200 dark:border-blue-500/20 font-medium transition-transform duration-300" title="Tarjetas nuevas">
             <span class="w-2 h-2 rounded-full bg-blue-500"></span>
             <span>Nuevas: <b id="counter-new" class="font-bold">0</b></span>
           </div>
-          <div class="flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-500/20 font-medium" title="Países ya dominados">
+          <div id="badge-counter-learned" class="flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-500/20 font-medium transition-transform duration-300" title="Países ya dominados">
             <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
             <span>Dominados: <b id="counter-learned" class="font-bold">0</b></span>
           </div>
+        </div>
+      </div>
+
+      <!-- Barra de progreso de la sesión de tarjetas -->
+      <div id="anki-session-tracker" class="bg-white dark:bg-slate-900/60 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col gap-2">
+        <div class="flex items-center justify-between text-xs">
+          <div class="flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-300">
+            <span class="text-sm">🗂️</span>
+            <span>Progreso de sesión: <b id="session-card-current" class="text-indigo-600 dark:text-indigo-400 font-bold">1</b> de <b id="session-card-total" class="font-bold">15</b></span>
+          </div>
+          <span id="session-progress-pct" class="font-bold text-slate-500 dark:text-slate-400 text-xs">0%</span>
+        </div>
+        <div class="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden border border-slate-200/60 dark:border-slate-700/60">
+          <div id="session-progress-bar" class="bg-gradient-to-r from-indigo-500 to-indigo-600 h-full rounded-full transition-all duration-300" style="width: 0%"></div>
         </div>
       </div>
 
@@ -529,6 +543,6 @@
   </div>
 
   <!-- JavaScript de la aplicación -->
-  <script src="/static/js/app.js?v=2.2"></script>
+  <script src="/static/js/app.js?v=2.3"></script>
 </body>
 </html>
