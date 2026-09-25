@@ -9,15 +9,18 @@ const state = {
   user: JSON.parse(localStorage.getItem('capitals_user') || 'null'),
   theme: localStorage.getItem('capitals_theme') || 'system',
   currentTab: 'anki',
-  dueCards: [],
-  currentCardIndex: 0,
+  readyQueue: [],        // Cola de tarjetas listas para estudiar ahora
+  scheduledQueue: [],    // Cola de tarjetas programadas en espera de su tiempo (e.g. Again: 60s, Hard: 10m)
+  currentCard: null,     // Tarjeta actualmente mostrada en pantalla
+  sessionCompleted: 0,   // Cantidad de tarjetas respondidas en esta sesión
+  sessionTotal: 0,       // Total de tarjetas cargadas en la sesión
   dueCount: 0,
   newCount: 0,
   learnedCount: 0,
-  sessionTotal: 0,
   isCardFlipped: false,
   isTransitioning: false,
   cardStartTime: null,
+  waitingInterval: null,
   countdownInterval: null,
   quizQuestion: null,
   quizStreak: 0,
@@ -422,7 +425,11 @@ function switchTab(tabName) {
 
   // Acciones al cambiar de pestaña
   if (tabName === 'anki') {
-    loadDueCards();
+    if (!state.currentCard && (!state.readyQueue || state.readyQueue.length === 0) && (!state.scheduledQueue || state.scheduledQueue.length === 0)) {
+      loadDueCards();
+    } else {
+      showNextCard();
+    }
   } else if (tabName === 'quiz') {
     loadNextQuizQuestion();
   } else if (tabName === 'explorer') {
@@ -456,18 +463,31 @@ function updateSessionIndicators() {
   const pctElem = document.getElementById('session-progress-pct');
   const barElem = document.getElementById('session-progress-bar');
 
-  if (dueElem) dueElem.textContent = state.dueCount;
-  if (newElem) newElem.textContent = state.newCount;
+  // Tarjetas pendientes de repaso: listas en cola + en espera de intervalo + actual si es de repaso
+  const readyReviews = (state.readyQueue || []).filter(c => c.repetitions > 0 || c.state === 'learning').length;
+  const currentIsReview = state.currentCard && (state.currentCard.repetitions > 0 || state.currentCard.state === 'learning') ? 1 : 0;
+  const dueTotal = readyReviews + (state.scheduledQueue || []).length + currentIsReview;
+
+  // Tarjetas nuevas: listas en cola que no tienen repasos + actual si es nueva
+  const readyNews = (state.readyQueue || []).filter(c => !c.repetitions || c.repetitions === 0).length;
+  const currentIsNew = state.currentCard && (!state.currentCard.repetitions || state.currentCard.repetitions === 0) ? 1 : 0;
+  const newTotal = readyNews + currentIsNew;
+
+  if (dueElem) dueElem.textContent = dueTotal;
+  if (newElem) newElem.textContent = newTotal;
   if (learnedElem) learnedElem.textContent = state.learnedCount;
 
-  const total = state.dueCards ? state.dueCards.length : 0;
-  const current = total > 0 ? Math.min(state.currentCardIndex + 1, total) : 0;
+  // Progreso de sesión
+  const remaining = (state.readyQueue ? state.readyQueue.length : 0) + (state.scheduledQueue ? state.scheduledQueue.length : 0);
+  const total = Math.max(state.sessionTotal, state.sessionCompleted + (state.currentCard ? 1 : 0) + remaining);
+  const current = Math.min(state.sessionCompleted + (state.currentCard ? 1 : 0), total);
+
   if (cardCurrentElem) cardCurrentElem.textContent = current;
   if (cardTotalElem) cardTotalElem.textContent = total;
 
-  const pct = total > 0 ? Math.round((state.currentCardIndex / total) * 100) : 100;
-  if (pctElem) pctElem.textContent = `${pct}%`;
-  if (barElem) barElem.style.width = `${pct}%`;
+  const pct = total > 0 ? Math.round((state.sessionCompleted / total) * 100) : 100;
+  if (pctElem) pctElem.textContent = `${Math.min(100, pct)}%`;
+  if (barElem) barElem.style.width = `${Math.min(100, pct)}%`;
 }
 
 async function loadDueCards(requestedLimit = 15) {
@@ -477,25 +497,28 @@ async function loadDueCards(requestedLimit = 15) {
     if (!res.ok) throw new Error('Error al cargar tarjetas.');
     
     const data = await res.json();
-    state.dueCards = data.cards;
-    state.currentCardIndex = 0;
+    
+    // Normalizar timestamps de las tarjetas recibidas
+    state.readyQueue = (data.cards || []).map(c => ({
+      ...c,
+      dueTimestamp: c.due_at ? Date.parse(c.due_at.replace(' ', 'T') + 'Z') : Date.now()
+    }));
+    state.scheduledQueue = [];
+    state.currentCard = null;
+    state.sessionTotal = state.readyQueue.length;
+    state.sessionCompleted = 0;
     state.dueCount = data.due_count;
     state.newCount = data.new_count;
-    state.sessionTotal = data.cards.length;
 
-    updateSessionIndicators();
+    if (state.waitingInterval) {
+      clearInterval(state.waitingInterval);
+      state.waitingInterval = null;
+    }
+    clearInterval(state.countdownInterval);
 
-    const tracker = document.getElementById('anki-session-tracker');
-    if (state.dueCards.length > 0) {
-      document.getElementById('anki-card-container').classList.remove('hidden');
-      document.getElementById('anki-empty-state').classList.add('hidden');
-      if (tracker) tracker.classList.remove('hidden');
-      clearInterval(state.countdownInterval);
-      renderCurrentCard();
-    } else {
-      document.getElementById('anki-card-container').classList.add('hidden');
-      document.getElementById('anki-empty-state').classList.remove('hidden');
-      if (tracker) tracker.classList.add('hidden');
+    showNextCard();
+
+    if (!state.currentCard && state.scheduledQueue.length === 0) {
       startCountdownTimer(data.next_due_time);
     }
   } catch (e) {
@@ -503,8 +526,156 @@ async function loadDueCards(requestedLimit = 15) {
   }
 }
 
+function showNextCard() {
+  // 1. Promover tarjetas de scheduledQueue cuya hora establecida ya llegó (dueTimestamp <= now)
+  const now = Date.now();
+  const readyFromScheduled = [];
+  const stillWaiting = [];
+
+  for (const card of (state.scheduledQueue || [])) {
+    if (card.dueTimestamp <= now) {
+      readyFromScheduled.push(card);
+    } else {
+      stillWaiting.push(card);
+    }
+  }
+  state.scheduledQueue = stillWaiting;
+
+  // Ordenar por hora de vencimiento ascendente (la que venció primero se atiende primero)
+  readyFromScheduled.sort((a, b) => a.dueTimestamp - b.dueTimestamp);
+
+  // Colocar las tarjetas vencidas al frente de la cola de estudio
+  if (readyFromScheduled.length > 0) {
+    state.readyQueue = [...readyFromScheduled, ...state.readyQueue];
+  }
+
+  // 2. Si hay tarjetas listas para estudiar en este momento
+  if (state.readyQueue.length > 0) {
+    if (state.waitingInterval) {
+      clearInterval(state.waitingInterval);
+      state.waitingInterval = null;
+    }
+
+    const waitingContainer = document.getElementById('anki-waiting-container');
+    const cardContainer = document.getElementById('anki-card-container');
+    const emptyState = document.getElementById('anki-empty-state');
+    const tracker = document.getElementById('anki-session-tracker');
+
+    if (waitingContainer) waitingContainer.classList.add('hidden');
+    if (emptyState) emptyState.classList.add('hidden');
+    if (cardContainer) cardContainer.classList.remove('hidden');
+    if (tracker) tracker.classList.remove('hidden');
+
+    state.currentCard = state.readyQueue.shift();
+    renderCurrentCard();
+    updateSessionIndicators();
+    return;
+  }
+
+  // 3. Si no hay tarjetas listas ahora mismo pero hay tarjetas esperando su intervalo (ej. 1 min con Again)
+  if (state.scheduledQueue.length > 0) {
+    state.scheduledQueue.sort((a, b) => a.dueTimestamp - b.dueTimestamp);
+    const nextCard = state.scheduledQueue[0];
+    showWaitingScreen(nextCard);
+    updateSessionIndicators();
+    return;
+  }
+
+  // 4. Si se completaron todas las tarjetas de la sesión actual
+  finishCurrentSession();
+}
+
+function showWaitingScreen(card) {
+  const waitingContainer = document.getElementById('anki-waiting-container');
+  const cardContainer = document.getElementById('anki-card-container');
+  const emptyState = document.getElementById('anki-empty-state');
+  const tracker = document.getElementById('anki-session-tracker');
+
+  if (cardContainer) cardContainer.classList.add('hidden');
+  if (emptyState) emptyState.classList.add('hidden');
+  if (waitingContainer) waitingContainer.classList.remove('hidden');
+  if (tracker) tracker.classList.remove('hidden');
+
+  const countryNameElem = document.getElementById('waiting-country-name');
+  const intervalLabelElem = document.getElementById('waiting-interval-label');
+  const timerElem = document.getElementById('waiting-timer');
+
+  if (countryNameElem) {
+    countryNameElem.textContent = `${card.flag_emoji || ''} ${card.name_es}`;
+  }
+  if (intervalLabelElem) {
+    intervalLabelElem.textContent = `Intervalo establecido: ${card.due_at_display || '1 min'}`;
+  }
+
+  if (state.waitingInterval) {
+    clearInterval(state.waitingInterval);
+  }
+
+  function tick() {
+    const diffMs = card.dueTimestamp - Date.now();
+    if (diffMs <= 0) {
+      clearInterval(state.waitingInterval);
+      state.waitingInterval = null;
+      showNextCard();
+      return;
+    }
+
+    const totalSeconds = Math.ceil(diffMs / 1000);
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    if (timerElem) {
+      timerElem.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+  }
+
+  tick();
+  state.waitingInterval = setInterval(tick, 250);
+}
+
+function skipWaitingCard() {
+  if (state.scheduledQueue && state.scheduledQueue.length > 0) {
+    if (state.waitingInterval) {
+      clearInterval(state.waitingInterval);
+      state.waitingInterval = null;
+    }
+    // Marcar como vencida inmediatamente para repasar ahora
+    state.scheduledQueue[0].dueTimestamp = Date.now();
+    showNextCard();
+  }
+}
+
+async function finishCurrentSession() {
+  state.currentCard = null;
+  const tracker = document.getElementById('anki-session-tracker');
+  const cardContainer = document.getElementById('anki-card-container');
+  const waitingContainer = document.getElementById('anki-waiting-container');
+  const emptyState = document.getElementById('anki-empty-state');
+
+  if (tracker) tracker.classList.add('hidden');
+  if (cardContainer) cardContainer.classList.add('hidden');
+  if (waitingContainer) waitingContainer.classList.add('hidden');
+  if (emptyState) emptyState.classList.remove('hidden');
+
+  await loadStats();
+
+  try {
+    const continent = document.getElementById('anki-continent').value;
+    const res = await apiFetch(`/api/srs/due?limit=1&continent=${continent}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.cards && data.cards.length > 0) {
+        loadDueCards();
+        return;
+      }
+      startCountdownTimer(data.next_due_time);
+    }
+  } catch (e) {
+    console.error(e);
+  }
+}
+
 function renderCurrentCard() {
-  const card = state.dueCards[state.currentCardIndex];
+  const card = state.currentCard;
   if (!card) return;
 
   state.isCardFlipped = false;
@@ -553,6 +724,11 @@ function renderCurrentCard() {
     document.getElementById('btn-hard-time').textContent = card.buttons.hard.label;
     document.getElementById('btn-good-time').textContent = card.buttons.good.label;
     document.getElementById('btn-easy-time').textContent = card.buttons.easy.label;
+  } else {
+    document.getElementById('btn-again-time').textContent = '1 min';
+    document.getElementById('btn-hard-time').textContent = '10 min';
+    document.getElementById('btn-good-time').textContent = '1 día';
+    document.getElementById('btn-easy-time').textContent = '4 días';
   }
 }
 
@@ -580,43 +756,12 @@ function toggleCardFlip() {
  * CRÍTICO: Garantiza que la siguiente carta jamás muestre su respuesta al voltear.
  */
 async function rateCard(rating) {
-  if (state.isTransitioning || !state.dueCards.length) return;
+  if (state.isTransitioning || !state.currentCard) return;
   state.isTransitioning = true;
 
-  const currentCard = state.dueCards[state.currentCardIndex];
+  const currentCard = state.currentCard;
   const responseTimeMs = state.cardStartTime ? Date.now() - state.cardStartTime : 0;
   const flashcard = document.getElementById('flashcard');
-
-  // Actualizar de forma inmediata los indicadores superiores para retroalimentación instantánea
-  const isNewCard = !currentCard.repetitions || currentCard.repetitions === 0;
-  if (isNewCard) {
-    state.newCount = Math.max(0, state.newCount - 1);
-  } else {
-    state.dueCount = Math.max(0, state.dueCount - 1);
-  }
-
-  if (rating === 'again') {
-    // Si se falla la tarjeta, se re-añade al final de la sesión para volver a practicarla
-    const retryCard = {
-      ...currentCard,
-      repetitions: (currentCard.repetitions || 0) + 1,
-      state: 'learning'
-    };
-    state.dueCards.push(retryCard);
-    state.dueCount += 1;
-    pulseBadge('badge-counter-due');
-  } else if (rating === 'good' || rating === 'easy') {
-    state.learnedCount += 1;
-    pulseBadge('badge-counter-learned');
-  } else if (rating === 'hard') {
-    pulseBadge('badge-counter-due');
-  }
-
-  updateSessionIndicators();
-
-  // 1. Iniciar animación de salida (la tarjeta actual se desvanece suavemente)
-  flashcard.classList.remove('card-transition-active');
-  flashcard.classList.add('card-transition-exit');
 
   // Enviar calificación al backend de forma asíncrona
   const reviewPromise = apiFetch('/api/srs/review', {
@@ -628,8 +773,58 @@ async function rateCard(rating) {
     }
   });
 
-  // 2. Esperar 220ms mientras la tarjeta se desvanece
-  await new Promise(r => setTimeout(r, 220));
+  // Incrementar conteo de progreso en la sesión
+  state.sessionCompleted++;
+
+  if (rating === 'again') {
+    // 1 minuto exacto (60 segundos)
+    const intervalSec = 60;
+    const retryCard = {
+      ...currentCard,
+      step: 0,
+      state: 'learning',
+      interval_seconds: intervalSec,
+      repetitions: (currentCard.repetitions || 0) + 1,
+      lapses: (currentCard.lapses || 0) + 1,
+      dueTimestamp: Date.now() + (intervalSec * 1000),
+      due_at_display: '1 min',
+      buttons: currentCard.buttons
+    };
+    state.scheduledQueue.push(retryCard);
+    pulseBadge('badge-counter-due');
+  } else if (rating === 'hard') {
+    // Si la tarjeta está en etapa de aprendizaje temprano (Paso 0 o 1), intervalo de 10 min
+    const isEarlyStep = !currentCard.step || currentCard.step <= 1;
+    if (isEarlyStep) {
+      const intervalSec = 600; // 10 min
+      const retryCard = {
+        ...currentCard,
+        step: 1,
+        state: 'learning',
+        interval_seconds: intervalSec,
+        repetitions: (currentCard.repetitions || 0) + 1,
+        dueTimestamp: Date.now() + (intervalSec * 1000),
+        due_at_display: '10 min',
+        buttons: currentCard.buttons
+      };
+      state.scheduledQueue.push(retryCard);
+      pulseBadge('badge-counter-due');
+    } else {
+      pulseBadge('badge-counter-due');
+    }
+  } else if (rating === 'good' || rating === 'easy') {
+    state.learnedCount += 1;
+    pulseBadge('badge-counter-learned');
+  }
+
+  updateSessionIndicators();
+
+  // 1. Iniciar animación de salida (la tarjeta actual se desvanece suavemente)
+  flashcard.classList.remove('card-transition-active');
+  flashcard.classList.add('card-transition-exit');
+
+  // 2. Esperar 200ms mientras la tarjeta se desvanece
+  await new Promise(r => setTimeout(r, 200));
 
   // 3. MIENTRAS ESTÁ OCULTA:
   // - Remover inmediatamente la clase 'is-flipped' para que vuelva a su cara frontal
@@ -639,31 +834,23 @@ async function rateCard(rating) {
   document.getElementById('actions-back').classList.add('hidden');
   state.isCardFlipped = false;
 
-  // Avanzar al siguiente índice
-  state.currentCardIndex++;
+  // 4. Mostrar la siguiente tarjeta (prioriza las que ya llegaron a su tiempo establecido)
+  showNextCard();
 
-  if (state.currentCardIndex < state.dueCards.length) {
-    // 4. Inyectar los datos de la NUEVA tarjeta mientras la tarjeta está frontal y oculta
-    renderCurrentCard();
-
-    // 5. Preparar la entrada: colocarla en posición inicial de entrada
+  // 5. Animar la entrada fluida si hay una tarjeta activa para mostrar
+  const cardContainer = document.getElementById('anki-card-container');
+  if (state.currentCard && cardContainer && !cardContainer.classList.contains('hidden')) {
     flashcard.classList.remove('card-transition-exit');
     flashcard.classList.add('card-transition-enter');
 
     // Forzar reflow del navegador para que la transición ocurra
     void flashcard.offsetHeight;
 
-    // 6. Animar la entrada fluida de la nueva tarjeta (con la cara frontal hacia adelante)
     flashcard.classList.remove('card-transition-enter');
     flashcard.classList.add('card-transition-active');
-
-    state.isTransitioning = false;
-  } else {
-    // Se completaron todas las tarjetas de la sesión actual
-    await loadDueCards();
-    await loadStats();
-    state.isTransitioning = false;
   }
+
+  state.isTransitioning = false;
 
   // Sincronizar confirmación con base de datos
   try {
@@ -676,6 +863,13 @@ async function rateCard(rating) {
       }
       if (data.is_learned) {
         triggerLearnedConfetti();
+      }
+      // Actualizar los botones para la tarjeta si reingresó a scheduledQueue
+      if (data.buttons && (rating === 'again' || rating === 'hard')) {
+        const queuedCard = state.scheduledQueue.find(c => c.id === currentCard.id);
+        if (queuedCard) {
+          queuedCard.buttons = data.buttons;
+        }
       }
     }
   } catch (e) {
@@ -739,6 +933,15 @@ function setupKeyboardShortcuts() {
     if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
 
     if (state.currentTab === 'anki') {
+      const waitingContainer = document.getElementById('anki-waiting-container');
+      if (waitingContainer && !waitingContainer.classList.contains('hidden')) {
+        if (e.code === 'Space' || e.key === 'Enter') {
+          e.preventDefault();
+          skipWaitingCard();
+          return;
+        }
+      }
+
       if (e.code === 'Space' || e.key === 'Enter') {
         e.preventDefault();
         toggleCardFlip();

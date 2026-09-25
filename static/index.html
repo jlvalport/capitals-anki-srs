@@ -220,6 +220,43 @@
         </div>
       </div>
 
+      <!-- Pantalla de Espera de Intervalo SRS (Cuando la tarjeta está esperando su tiempo exacto de repaso) -->
+      <div id="anki-waiting-container" class="hidden text-center py-12 px-6 bg-white dark:bg-slate-900/60 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-5 max-w-lg mx-auto">
+        <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 text-3xl border border-indigo-200 dark:border-indigo-800/40 animate-pulse">
+          ⏱️
+        </div>
+        <div>
+          <span class="px-3 py-1 rounded-full text-xs font-semibold bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-700/40">
+            Repaso programado
+          </span>
+          <h3 class="text-xl font-bold text-slate-900 dark:text-white mt-2">
+            Próximo repaso en camino
+          </h3>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            La tarjeta de <span id="waiting-country-name" class="font-bold text-slate-800 dark:text-slate-200"></span> saldrá en:
+          </p>
+        </div>
+
+        <div class="inline-block py-3 px-8 bg-slate-50 dark:bg-slate-800/90 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-inner">
+          <div id="waiting-timer" class="text-4xl font-black font-mono tracking-wider text-indigo-600 dark:text-indigo-400">
+            00:00
+          </div>
+          <span id="waiting-interval-label" class="text-xs font-medium text-slate-400 dark:text-slate-500 mt-1 block">
+            Intervalo establecido: 1 min (Otra vez)
+          </span>
+        </div>
+
+        <p class="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto">
+          Aparecerá automáticamente en pantalla tan pronto se cumpla el tiempo establecido.
+        </p>
+
+        <div>
+          <button type="button" onclick="skipWaitingCard()" class="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-300 font-semibold text-xs rounded-xl border border-indigo-200 dark:border-indigo-800/40 transition">
+            ⚡ Repasar ahora sin esperar
+          </button>
+        </div>
+      </div>
+
       <!-- Área de la Tarjeta Anki -->
       <div id="anki-card-container" class="perspective-container relative">
         
@@ -543,6 +580,6 @@
   </div>
 
   <!-- JavaScript de la aplicación -->
-  <script src="/static/js/app.js?v=2.3"></script>
+  <script src="/static/js/app.js?v=2.4"></script>
 </body>
 </html>

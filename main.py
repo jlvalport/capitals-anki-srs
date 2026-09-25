@@ -286,18 +286,15 @@ def get_due_cards(
             is_learned=card["is_learned"]
         )
 
-    # Próxima tarjeta en espera si no hay ninguna disponible ahora
-    next_due_time = None
-    if not cards:
-        cursor.execute("""
-            SELECT due_at 
-            FROM user_country_progress 
-            WHERE user_id = ? AND due_at > ?
-            ORDER BY due_at ASC LIMIT 1;
-        """, (current_user["id"], now_str))
-        next_row = cursor.fetchone()
-        if next_row:
-            next_due_time = next_row["due_at"]
+    # Próxima tarjeta programada en espera (si la hay)
+    cursor.execute("""
+        SELECT due_at 
+        FROM user_country_progress 
+        WHERE user_id = ? AND due_at > ?
+        ORDER BY due_at ASC LIMIT 1;
+    """, (current_user["id"], now_str))
+    next_row = cursor.fetchone()
+    next_due_time = next_row["due_at"] if next_row else None
 
     conn.close()
 
@@ -432,6 +429,13 @@ def submit_review(
     conn.commit()
     conn.close()
 
+    new_buttons = get_button_intervals(
+        step=result["step"],
+        interval_seconds=result["interval_seconds"],
+        ease_factor=result["ease_factor"],
+        is_learned=result["is_learned"]
+    )
+
     return {
         "success": True,
         "rating": req.rating,
@@ -441,6 +445,7 @@ def submit_review(
         "interval_label": result["interval_label"],
         "is_learned": bool(result["is_learned"]),
         "due_at": result["due_at"],
+        "buttons": new_buttons,
         "total_learned": total_learned,
         "total_learning": total_learning
     }
