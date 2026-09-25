@@ -34,7 +34,8 @@ capitals_of_countries/
 │   └── js/
 │       └── app.js              # Controlador SPA, consumo de API, gestión de estado y atajos
 ├── tests/
-│   └── test_srs_and_auth.py    # Suite de pruebas automatizadas (6 tests de integración)
+│   ├── test_srs_and_auth.py    # Suite de pruebas automatizadas (autenticación y flujo base)
+│   └── test_srs_buttons_and_queue.py # Pruebas de botones SRS, temporización e intervalos en cola FIFO
 ├── run.sh                      # Script ejecutable de inicio rápido del servidor
 ├── GUIA_APRENDIZAJE.md         # Documento educativo para comprender cada pieza de la app
 ├── ESPECIFICACIONES_SISTEMA.md  # ESTE DOCUMENTO: Fuente única de especificaciones técnicas
@@ -204,7 +205,7 @@ Para evitar que el usuario vea la capital del siguiente país al calificar:
 4. **Fechas en UTC**:
    - SQLite no almacena tipos de zona horaria; todas las fechas (`due_at`, `expires_at`, `created_at`) deben generarse siempre en UTC (`datetime.now(timezone.utc)`). Nunca usar `datetime.utcnow()` (obsoleto en Python 3.12+).
 5. **Pruebas Automatizadas Obligatorias**:
-   - Tras cualquier cambio en `srs_engine.py`, `auth.py`, `main.py` o `database.py`, ejecutar la suite completa de pruebas unitarias e integración (14 tests):
+   - Tras cualquier cambio en `srs_engine.py`, `auth.py`, `main.py` o `database.py`, ejecutar la suite completa de pruebas unitarias e integración (21 tests):
      ```bash
      .venv/bin/python -m unittest discover tests
      ```
