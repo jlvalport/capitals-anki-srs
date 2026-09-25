@@ -1,8 +1,8 @@
 import os
 import random
 from datetime import datetime, timezone
-from typing import Optional, List
-from fastapi import FastAPI, Depends, HTTPException, status, Query, Request
+from typing import Optional
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Request, Header
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -141,7 +141,14 @@ def get_me(current_user: dict = Depends(get_current_user)):
     return {"user": current_user}
 
 @app.post("/api/auth/logout")
-def logout(current_user: dict = Depends(get_current_user)):
+def logout(
+    current_user: dict = Depends(get_current_user),
+    authorization: Optional[str] = Header(None)
+):
+    if authorization:
+        parts = authorization.strip().split()
+        token = parts[1] if len(parts) == 2 and parts[0].lower() == "bearer" else parts[0]
+        delete_session(token)
     return {"message": "Sesión cerrada exitosamente."}
 
 

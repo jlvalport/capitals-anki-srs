@@ -1,6 +1,5 @@
 import sqlite3
 import os
-from datetime import datetime
 from data.countries_seed import ALL_COUNTRIES
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "capitals_srs.db")

@@ -14,8 +14,6 @@ const state = {
   currentCard: null,     // Tarjeta actualmente mostrada en pantalla
   sessionCompleted: 0,   // Cantidad de tarjetas respondidas en esta sesión
   sessionTotal: 0,       // Total de tarjetas cargadas en la sesión
-  dueCount: 0,
-  newCount: 0,
   learnedCount: 0,
   isCardFlipped: false,
   isTransitioning: false,
@@ -507,8 +505,6 @@ async function loadDueCards(requestedLimit = 15) {
     state.currentCard = null;
     state.sessionTotal = state.readyQueue.length;
     state.sessionCompleted = 0;
-    state.dueCount = data.due_count;
-    state.newCount = data.new_count;
 
     if (state.waitingInterval) {
       clearInterval(state.waitingInterval);
@@ -516,10 +512,11 @@ async function loadDueCards(requestedLimit = 15) {
     }
     clearInterval(state.countdownInterval);
 
-    showNextCard();
-
-    if (!state.currentCard && state.scheduledQueue.length === 0) {
+    if (state.readyQueue.length === 0) {
+      showEmptySessionUI();
       startCountdownTimer(data.next_due_time);
+    } else {
+      showNextCard();
     }
   } catch (e) {
     console.error('Error cargando tarjetas SRS:', e);
@@ -646,16 +643,7 @@ function skipWaitingCard() {
 
 async function finishCurrentSession() {
   state.currentCard = null;
-  const tracker = document.getElementById('anki-session-tracker');
-  const cardContainer = document.getElementById('anki-card-container');
-  const waitingContainer = document.getElementById('anki-waiting-container');
-  const emptyState = document.getElementById('anki-empty-state');
-
-  if (tracker) tracker.classList.add('hidden');
-  if (cardContainer) cardContainer.classList.add('hidden');
-  if (waitingContainer) waitingContainer.classList.add('hidden');
-  if (emptyState) emptyState.classList.remove('hidden');
-
+  showEmptySessionUI();
   await loadStats();
 
   try {
@@ -672,6 +660,18 @@ async function finishCurrentSession() {
   } catch (e) {
     console.error(e);
   }
+}
+
+function showEmptySessionUI() {
+  const tracker = document.getElementById('anki-session-tracker');
+  const cardContainer = document.getElementById('anki-card-container');
+  const waitingContainer = document.getElementById('anki-waiting-container');
+  const emptyState = document.getElementById('anki-empty-state');
+
+  if (tracker) tracker.classList.add('hidden');
+  if (cardContainer) cardContainer.classList.add('hidden');
+  if (waitingContainer) waitingContainer.classList.add('hidden');
+  if (emptyState) emptyState.classList.remove('hidden');
 }
 
 function renderCurrentCard() {
